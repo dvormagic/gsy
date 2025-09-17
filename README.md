@@ -78,6 +78,59 @@ other_key: "regular-value"
 
 In **prod mode**, the `database_url` would fetch the actual secret value from GCP instead of using the reference string.
 
+## Multi-Environment YAML Setup
+
+GSY works perfectly with multi-file configurations, where you maintain separate YAML files for different environments (e.g., `config.local.yml` for development, `config.staging.yml` for staging, `config.yml` for production). Load the appropriate file based on an environment variable (e.g., `ENV=local`, `ENV=staging`, `ENV=prod`), then call `SetEnv(ENV)` before unmarshaling to resolve secrets accordingly.
+
+- **Local/Dev (`config.local.yml`)**: Use plain strings for all secrets.
+
+  ```yaml
+  database:
+    password: "local-db-password" # Plain string, resolved directly
+  jwt:
+    secret: "local-jwt-secret"
+  ```
+
+- **Staging/Prod (`config.staging.yml` or `config.yml`)**: Use GCP Secret Manager references.
+  ```yaml
+  database:
+    password:
+      secret: "projects/my-project/secrets/db-password/versions/latest" # Fetched from GCP
+  jwt:
+    secret:
+      secret: "projects/my-project/secrets/jwt-secret/versions/latest"
+  ```
+
+### Example Loader
+
+```go
+func LoadSettings() (*Settings, error) {
+    env := os.Getenv("ENV") // e.g., "local", "staging", "prod"
+
+    configDir := findConfigDir() // Your logic to locate config/
+    filename := fmt.Sprintf("%s/config.%s.yml", configDir, env) // or config.yml for prod
+
+    if env == "prod" {
+        filename = fmt.Sprintf("%s/config.yml", configDir)
+    }
+
+    data, err := os.ReadFile(filename)
+    if err != nil {
+        return nil, err
+    }
+
+    settings := &Settings{}
+    secretstring.SetEnv(env) // Set mode based on ENV
+    if err := yaml.Unmarshal(data, settings); err != nil {
+        return nil, err
+    }
+
+    return settings, nil
+}
+```
+
+This pattern ensures the same config structs work across environments: plain values in local files are used directly, while GCP fetches occur in staging/prod. No code changes needed when switching files – just update ENV and SetEnv.
+
 ### YAML Formats Supported
 
 - **Plain String (Local/Prod fallback)**: `api_key: "my-secret-value"`

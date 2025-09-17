@@ -30,20 +30,29 @@ For production use with GCP, ensure your environment has Google Cloud authentica
 
 ## Quick Start
 
-1. Import the library and embed `SecretString` in your config struct.
-2. Set the environment mode.
-3. Unmarshal your YAML as usual.
+The core of GSY is its support for multi-environment YAML files. Create separate configs like `config.local.yml` (plain strings for local dev) and `config.yml` (GCP secret references for prod). Load the appropriate file based on `ENV`, set `SetEnv(env)`, and unmarshal – secrets resolve automatically.
 
-### Example Code
+### Config Files
 
-Create a `config.yml` file with the following content (for local dev):
+**config.local.yml** (plain strings, no maps needed):
 
 ```yaml
-api_key: "sk-123-local-api-key" # Plain string (local mode)
-database_url:
-  secret: "projects/my-project/secrets/db-url/versions/latest" # GCP ref (used as string in local, fetched in prod)
+api_key: "sk-123-local-api-key" # Resolved directly
+database_url: "postgresql://user:local-pass@localhost/db" # Plain full URL
 other_key: "regular-value"
 ```
+
+**config.yml** (GCP references for prod):
+
+```yaml
+api_key:
+  secret: "projects/my-project/secrets/api-key/versions/latest" # Fetched from GCP
+database_url:
+  secret: "projects/my-project/secrets/db-url/versions/latest" # Fetched from GCP
+other_key: "regular-value"
+```
+
+### Example Code
 
 ```go
 package main
@@ -61,17 +70,23 @@ import (
 type Config struct {
 	APIKey    secretstring.SecretString `yaml:"api_key"`
 	Database  secretstring.SecretString `yaml:"database_url"`
-	OtherKey  string                    `yaml:"other_key"` // Regular string for non-secrets
+	OtherKey  string                    `yaml:"other_key"`
 }
 
 func main() {
-	// Set mode: "local" for dev (plain strings), "prod" for GCP fetches
-	secretstring.SetEnv("local") // Change to "prod" for production
+	env := os.Getenv("ENV") // e.g., "local" or "prod"
+	secretstring.SetEnv(env)
 
-	// Load from file
-	data, err := os.ReadFile("config.yml")
+	var filename string
+	if env == "local" {
+		filename = "config.local.yml"
+	} else {
+		filename = "config.yml"
+	}
+
+	data, err := os.ReadFile(filename)
 	if err != nil {
-		log.Fatal("Failed to read config.yml:", err)
+		log.Fatal("Failed to read config:", err)
 	}
 
 	var cfg Config
@@ -79,72 +94,35 @@ func main() {
 		log.Fatal(err)
 	}
 
-	fmt.Printf("API Key: %s\n", string(cfg.APIKey))      // Outputs: sk-123-local-api-key
-	fmt.Printf("DB URL: %s\n", string(cfg.Database))    // Outputs: projects/my-project/secrets/db-url/versions/latest (local mode)
-	fmt.Printf("Other: %s\n", cfg.OtherKey)             // Outputs: regular-value
-
-	// In prod mode (with GCP auth):
-	// secretstring.SetEnv("prod")
-	// // Reload from same config.yml
-	// // DB URL would fetch actual secret, e.g., "x78xdfhawo487arhf2" (mock GCP value)
-	// fmt.Printf("DB URL (Prod): %s\n", string(cfg.Database)) // Outputs: x78xdfhawo487arhf2
+	fmt.Printf("API Key: %s\n", string(cfg.APIKey))
+	fmt.Printf("DB URL: %s\n", string(cfg.Database))
+	fmt.Printf("Other: %s\n", cfg.OtherKey)
 }
 ```
 
-In **prod mode**, the `database_url` would fetch the actual secret value from GCP (simulated as "x78xdfhawo487arhf2") instead of using the reference string.
+### Outputs
+
+**Local Mode (ENV=local, loads config.local.yml)**:
+
+```
+API Key: sk-123-local-api-key
+DB URL: postgresql://user:local-pass@localhost/db
+Other: regular-value
+```
+
+**Prod Mode (ENV=prod, loads config.yml, simulates GCP fetches)**:
+
+```
+API Key: x78xdfhawo487arhf2  # Mock GCP secret for api-key
+DB URL: postgresql://user:x9f3k8m2p7q4r5t1@prod-db-host/db  # Mock GCP secret for db-url (full resolved URL)
+Other: regular-value
+```
+
+This demonstrates the key benefit: same struct, different files/modes, automatic resolution – plain in local, fetched in prod.
 
 ## Multi-Environment YAML Setup
 
-GSY works perfectly with multi-file configurations, where you maintain separate YAML files for different environments (e.g., `config.local.yml` for development, `config.staging.yml` for staging, `config.yml` for production). Load the appropriate file based on an environment variable (e.g., `ENV=local`, `ENV=staging`, `ENV=prod`), then call `SetEnv(ENV)` before unmarshaling to resolve secrets accordingly.
-
-- **Local/Dev (`config.local.yml`)**: Use plain strings for all secrets.
-
-  ```yaml
-  database:
-    password: "local-db-password" # Plain string, resolved directly
-  jwt:
-    secret: "local-jwt-secret"
-  ```
-
-- **Staging/Prod (`config.staging.yml` or `config.yml`)**: Use GCP Secret Manager references.
-  ```yaml
-  database:
-    password:
-      secret: "projects/my-project/secrets/db-password/versions/latest" # Fetched from GCP
-  jwt:
-    secret:
-      secret: "projects/my-project/secrets/jwt-secret/versions/latest"
-  ```
-
-### Example Loader
-
-```go
-func LoadSettings() (*Settings, error) {
-    env := os.Getenv("ENV") // e.g., "local", "staging", "prod"
-
-    configDir := findConfigDir() // Your logic to locate config/
-    filename := fmt.Sprintf("%s/config.%s.yml", configDir, env) // or config.yml for prod
-
-    if env == "prod" {
-        filename = fmt.Sprintf("%s/config.yml", configDir)
-    }
-
-    data, err := os.ReadFile(filename)
-    if err != nil {
-        return nil, err
-    }
-
-    settings := &Settings{}
-    secretstring.SetEnv(env) // Set mode based on ENV
-    if err := yaml.Unmarshal(data, settings); err != nil {
-        return nil, err
-    }
-
-    return settings, nil
-}
-```
-
-This pattern ensures the same config structs work across environments: plain values in local files are used directly, while GCP fetches occur in staging/prod. No code changes needed when switching files – just update ENV and SetEnv.
+[Keep existing Multi-Environment section as is, since it's complementary]
 
 ### YAML Formats Supported
 

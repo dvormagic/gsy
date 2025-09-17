@@ -36,12 +36,22 @@ For production use with GCP, ensure your environment has Google Cloud authentica
 
 ### Example Code
 
+Create a `config.yml` file with the following content (for local dev):
+
+```yaml
+api_key: "sk-123-local-api-key" # Plain string (local mode)
+database_url:
+  secret: "projects/my-project/secrets/db-url/versions/latest" # GCP ref (used as string in local, fetched in prod)
+other_key: "regular-value"
+```
+
 ```go
 package main
 
 import (
 	"fmt"
 	"log"
+	"os"
 
 	"gopkg.in/yaml.v3"
 
@@ -58,25 +68,30 @@ func main() {
 	// Set mode: "local" for dev (plain strings), "prod" for GCP fetches
 	secretstring.SetEnv("local") // Change to "prod" for production
 
-	// Example YAML for local dev
-	yamlData := []byte(`
-api_key: "sk-123-local-api-key"  # Plain string (local mode)
-database_url: {secret: "projects/my-project/secrets/db-url/versions/latest"}  # GCP ref (ignored in local, fetched in prod)
-other_key: "regular-value"
-`)
+	// Load from file
+	data, err := os.ReadFile("config.yml")
+	if err != nil {
+		log.Fatal("Failed to read config.yml:", err)
+	}
 
 	var cfg Config
-	if err := yaml.Unmarshal(yamlData, &cfg); err != nil {
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		log.Fatal(err)
 	}
 
-	fmt.Printf("API Key: %s\n", cfg.APIKey)      // Outputs: sk-123-local-api-key
-	fmt.Printf("DB URL: %s\n", cfg.Database)    // Outputs: projects/my-project/secrets/db-url/versions/latest (local mode)
-	fmt.Printf("Other: %s\n", cfg.OtherKey)     // Outputs: regular-value
+	fmt.Printf("API Key: %s\n", string(cfg.APIKey))      // Outputs: sk-123-local-api-key
+	fmt.Printf("DB URL: %s\n", string(cfg.Database))    // Outputs: projects/my-project/secrets/db-url/versions/latest (local mode)
+	fmt.Printf("Other: %s\n", cfg.OtherKey)             // Outputs: regular-value
+
+	// In prod mode (with GCP auth):
+	// secretstring.SetEnv("prod")
+	// // Reload from same config.yml
+	// // DB URL would fetch actual secret, e.g., "x78xdfhawo487arhf2" (mock GCP value)
+	// fmt.Printf("DB URL (Prod): %s\n", string(cfg.Database)) // Outputs: x78xdfhawo487arhf2
 }
 ```
 
-In **prod mode**, the `database_url` would fetch the actual secret value from GCP instead of using the reference string.
+In **prod mode**, the `database_url` would fetch the actual secret value from GCP (simulated as "x78xdfhawo487arhf2") instead of using the reference string.
 
 ## Multi-Environment YAML Setup
 
